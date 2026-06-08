@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>손 인식 인터랙티브 영상</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    h1 {
+      color: #fff;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      opacity: 0.6;
+      letter-spacing: 3px;
+    }
+
+    .stage {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+    }
+
+    /* ── 메인 영상 ── */
+    .video-wrap {
+      position: relative;
+      width: 560px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+
+    #mainVideo {
+      width: 100%;
+      display: block;
+    }
+
+    .laugh-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      background: radial-gradient(ellipse at center, rgba(255,220,50,0.18) 0%, transparent 70%);
+    }
+
+    .emoji-burst {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .status-badge {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 20px;
+      border-radius: 20px;
+      font-size: 1rem;
+      font-weight: bold;
+      color: #fff;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(8px);
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .video-wrap.laughing {
+      animation: shake 0.12s infinite alternate;
+    }
+    .video-wrap.laughing .laugh-overlay { opacity: 1; }
+    .video-wrap.laughing .status-badge {
+      background: rgba(255,175,0,0.9);
+      transform: translateX(-50%) scale(1.08);
+    }
+
+    @keyframes shake {
+      0%  { transform: rotate(-1.5deg) scale(1.02); }
+      100%{ transform: rotate( 1.5deg) scale(1.02); }
+    }
+
+    .emoji-particle {
+      position: absolute;
+      animation: floatUp 1s ease-out forwards;
+      pointer-events: none;
+    }
+    @keyframes floatUp {
+      0%   { transform: translateY(0) scale(0.4) rotate(-10deg); opacity: 1; }
+      100% { transform: translateY(-220px) scale(1.4) rotate(15deg); opacity: 0; }
+    }
+
+    /* ── 웹캠 패널 ── */
+    .cam-wrap {
+      width: 200px;
+    }
+
+    .cam-label {
+      color: #888;
+      font-size: 0.72rem;
+      text-align: center;
+      margin-bottom: 6px;
+      letter-spacing: 1px;
+    }
+
+    /* 손 영역만 보여주는 캔버스 컨테이너 */
+    .hand-view {
+      position: relative;
+      width: 200px;
+      height: 150px;        /* 웹캠 하단 절반만 보여줌 */
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    /* 웹캠 원본은 숨김 - MediaPipe 입력용 */
+    #webcamVideo { display: none; }
+
+    /* 손 영역 표시 캔버스 */
+    #camCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 손 랜드마크 오버레이 */
+    #handCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .gesture-indicator {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 3rem;
+      transition: transform 0.2s;
+      filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));
+    }
+    .gesture-indicator.open { transform: scale(1.2); }
+
+    .gesture-hint {
+      margin-top: 8px;
+      color: #555;
+      font-size: 0.68rem;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    /* ── 시작 버튼 ── */
+    #startBtn {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.88);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      cursor: pointer;
+      border: none;
+      color: #fff;
+    }
+    #startBtn .btn-inner {
+      background: linear-gradient(135deg, #ff6b35, #f7c948);
+      padding: 18px 52px;
+      border-radius: 50px;
+      font-size: 1.3rem;
+      font-weight: bold;
+      color: #000;
+      box-shadow: 0 0 40px rgba(255,200,0,0.4);
+      transition: transform 0.2s;
+    }
+    #startBtn .btn-inner:hover { transform: scale(1.06); }
+    #startBtn p { margin-top: 14px; opacity: 0.45; font-size: 0.82rem; }
+
+    /* ── 로딩 ── */
+    #loading {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 99;
+      color: #fff;
+      gap: 14px;
+    }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid #333;
+      border-top-color: #f7c948;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<button id="startBtn" onclick="startAll()">
+  <div class="btn-inner">✋ 시작하기</div>
+  <p>웹캠 접근 권한이 필요합니다</p>
+</button>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>손 인식 모델 로딩 중...</p>
+</div>
+
+
+<div class="stage">
+  <!-- 메인 영상 -->
+  <div class="video-wrap" id="videoWrap">
+    <video id="mainVideo" src="0608.mp4" loop muted playsinline></video>
+    <div class="laugh-overlay"></div>
+    <div class="emoji-burst" id="emojiBurst"></div>
+  </div>
+
+  <!-- 손 인식 패널 -->
+  <div class="cam-wrap">
+    <div class="cam-label">✋ 손을 아래에 보여주세요</div>
+    <div class="hand-view">
+      <video id="webcamVideo" autoplay playsinline muted></video>
+      <canvas id="camCanvas"></canvas>
+      <canvas id="handCanvas"></canvas>
+    </div>
+    <div class="gesture-indicator" id="gestureIcon">✊</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const mainVideo   = document.getElementById('mainVideo');
+const videoWrap   = document.getElementById('videoWrap');
+
+const gestureIcon = document.getElementById('gestureIcon');
+const emojiBurst  = document.getElementById('emojiBurst');
+const webcamVideo = document.getElementById('webcamVideo');
+const camCanvas   = document.getElementById('camCanvas');
+const handCanvas  = document.getElementById('handCanvas');
+const camCtx      = camCanvas.getContext('2d');
+const handCtx     = handCanvas.getContext('2d');
+
+// 웹캠 하단 몇 %를 잘라서 보여줄지 (얼굴 제거)
+const CROP_START = 0.65; // 상위 65% 잘라냄 → 하단 35%만 표시
+
+let isLaughing    = false;
+let emojiTimer    = null;
+let audioCtx      = null;
+const EMOJIS      = ['😂','🤣','😆','😹','🎉','✨','💥','😄'];
+
+// 팡파레 MP3
+let fanfareBuffer = null;
+let fanfareSrc    = null;
+const FANFARE_START = 5; // 신나는 부분 시작 (초)
+
+/* ── 손 열림/닫힘 판별 ─────────────────────────────── */
+function isOpenHand(lm) {
+  // 검지~새끼: 끝(tip)이 뿌리(mcp)보다 위에 있으면 펴진 것
+  const tips = [8, 12, 16, 20];
+  const mcps = [5,  9, 13, 17];
+  let open = 0;
+  for (let i = 0; i < 4; i++) {
+    if (lm[tips[i]].y < lm[mcps[i]].y) open++;
+  }
+  return open >= 3; // 3개 이상 펴지면 open
+}
+
+/* ── 웃음 시작 ─────────────────────────────────────── */
+function startLaughing() {
+  if (isLaughing) return;
+  isLaughing = true;
+
+  mainVideo.play();
+  videoWrap.classList.add('laughing');
+  gestureIcon.textContent = '✋';
+  gestureIcon.classList.add('open');
+
+  emojiTimer = setInterval(spawnEmojis, 280);
+  spawnEmojis();
+  playFanfare();
+}
+
+/* ── 무표정으로 ────────────────────────────────────── */
+function stopLaughing() {
+  if (!isLaughing) return;
+  isLaughing = false;
+
+  mainVideo.pause();
+  mainVideo.currentTime = 0;
+  videoWrap.classList.remove('laughing');
+  gestureIcon.textContent = '✊';
+  gestureIcon.classList.remove('open');
+
+  clearInterval(emojiTimer);
+  stopCrowd();
+}
+
+/* ── 이모지 파티클 ─────────────────────────────────── */
+function spawnEmojis() {
+  for (let i = 0; i < 4; i++) {
+    const el = document.createElement('span');
+    el.className = 'emoji-particle';
+    el.textContent = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+    el.style.cssText = `
+      left: ${Math.random() * 88}%;
+      bottom: ${10 + Math.random() * 20}%;
+      font-size: ${1.4 + Math.random() * 1.6}rem;
+      animation-duration: ${0.7 + Math.random() * 0.7}s;
+    `;
+    emojiBurst.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+}
+
+/* ── 팡파레 MP3 재생 ───────────────────────────────── */
+function triggerLaughSound() { /* 팡파레로 대체 - 아래 playFanfare() 사용 */ }
+function triggerClapSound()  { /* 팡파레로 대체 */ }
+function stopCrowd()         { stopFanfare(); }
+
+async function loadFanfare() {
+  if (fanfareBuffer) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const res  = await fetch('fanfare.mp3');
+    const data = await res.arrayBuffer();
+    fanfareBuffer = await audioCtx.decodeAudioData(data);
+  } catch(e) { console.warn('팡파레 로드 실패', e); }
+}
+
+function playFanfare() {
+  if (!audioCtx || !fanfareBuffer) return;
+  stopFanfare();
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+  gainNode.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.3); // 페이드인
+  gainNode.connect(audioCtx.destination);
+
+  fanfareSrc = audioCtx.createBufferSource();
+  fanfareSrc.buffer = fanfareBuffer;
+  fanfareSrc.loop   = true;
+  fanfareSrc.loopStart = FANFARE_START;
+  fanfareSrc.loopEnd   = fanfareBuffer.duration;
+  fanfareSrc.connect(gainNode);
+  fanfareSrc.start(0, FANFARE_START); // 5초 지점부터 재생
+  fanfareSrc._gainNode = gainNode;
+}
+
+function stopFanfare() {
+  if (!fanfareSrc) return;
+  try {
+    const g = fanfareSrc._gainNode;
+    if (g) {
+      g.gain.setValueAtTime(g.gain.value, audioCtx.currentTime);
+      g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3); // 페이드아웃
+    }
+    fanfareSrc.stop(audioCtx.currentTime + 0.3);
+  } catch(e) {}
+  fanfareSrc = null;
+}
+
+/* ── 웹캠 손 영역만 캔버스에 렌더링 ──────────────── */
+function renderHandView() {
+  const dw = camCanvas.offsetWidth;
+  const dh = camCanvas.offsetHeight;
+  if (!dw || !dh) return;
+  camCanvas.width  = dw;
+  camCanvas.height = dh;
+  handCanvas.width  = dw;
+  handCanvas.height = dh;
+  // 배경은 검은색만 (웹캠 영상 미표시)
+  camCtx.fillStyle = '#000';
+  camCtx.fillRect(0, 0, dw, dh);
+}
+
+/* ── 랜드마크 그리기 (손 영역 크롭 좌표 보정) ─────── */
+function drawLandmarks(lm) {
+  const dw = handCanvas.width;
+  const dh = handCanvas.height;
+  handCtx.clearRect(0, 0, dw, dh);
+
+  // lm의 y 좌표는 전체 프레임 기준 → 크롭 보정
+  function px(l) {
+    const mx = (1 - l.x) * dw; // 거울 반전
+    const my = ((l.y - CROP_START) / (1 - CROP_START)) * dh;
+    return [mx, my];
+  }
+
+  const conns = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [5,9],[9,10],[10,11],[11,12],
+    [9,13],[13,14],[14,15],[15,16],
+    [13,17],[17,18],[18,19],[19,20],[0,17]
+  ];
+
+  handCtx.strokeStyle = 'rgba(255,210,0,0.85)';
+  handCtx.lineWidth = 2;
+  for (const [a, b] of conns) {
+    const [ax, ay] = px(lm[a]);
+    const [bx, by] = px(lm[b]);
+    handCtx.beginPath();
+    handCtx.moveTo(ax, ay);
+    handCtx.lineTo(bx, by);
+    handCtx.stroke();
+  }
+  handCtx.fillStyle = '#fff';
+  for (const l of lm) {
+    const [x, y] = px(l);
+    handCtx.beginPath();
+    handCtx.arc(x, y, 4, 0, Math.PI * 2);
+    handCtx.fill();
+  }
+}
+
+/* ── 제스처 버퍼 ───────────────────────────────────── */
+const BUF = 5;
+let buf = [], lastGesture = null, stopTimer = null;
+
+function onResults(results) {
+  renderHandView();
+  handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+
+  if (!results.multiHandLandmarks?.length) {
+    buf.push('none');
+  } else {
+    const lm = results.multiHandLandmarks[0];
+    drawLandmarks(lm);
+    buf.push(isOpenHand(lm) ? 'open' : 'fist');
+  }
+
+  if (buf.length > BUF) buf.shift();
+
+  const openCnt = buf.filter(g => g === 'open').length;
+  const fistCnt = buf.filter(g => g === 'fist').length;
+
+  if (openCnt >= 3) {
+    // 확실히 손 펴짐 → 즉시 웃음 시작, 예약된 멈춤 취소
+    clearTimeout(stopTimer); stopTimer = null;
+    if (lastGesture !== 'open') { lastGesture = 'open'; startLaughing(); }
+  } else if (fistCnt >= 4) {
+    // 확실히 주먹 → 0.6초 후 멈춤 (잠깐 인식 실패와 구분)
+    if (lastGesture !== 'fist') {
+      lastGesture = 'fist';
+      clearTimeout(stopTimer);
+      stopTimer = setTimeout(stopLaughing, 0);
+    }
+  }
+  // none만 쌓이는 경우(손 치움) → 1초 후 멈춤
+  const noneCnt = buf.filter(g => g === 'none').length;
+  if (noneCnt === BUF && lastGesture === 'open') {
+    lastGesture = 'none';
+    clearTimeout(stopTimer);
+    stopTimer = setTimeout(stopLaughing, 1000);
+  }
+}
+
+/* ── 시작 ──────────────────────────────────────────── */
+async function startAll() {
+  document.getElementById('startBtn').style.display = 'none';
+  document.getElementById('loading').style.display  = 'flex';
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 320, height: 240, facingMode: 'user' }
+  });
+  webcamVideo.srcObject = stream;
+  await new Promise(r => webcamVideo.onloadedmetadata = r);
+
+  // 영상은 처음에 정지 상태 (주먹 = 무표정)
+  mainVideo.load();
+  mainVideo.pause();
+
+  // 팡파레 미리 로드
+  await loadFanfare();
+
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.4
+  });
+  hands.onResults(onResults);
+
+  const camera = new Camera(webcamVideo, {
+    onFrame: async () => { await hands.send({ image: webcamVideo }); },
+    width: 320, height: 240
+  });
+  camera.start();
+
+  document.getElementById('loading').style.display = 'none';
+}
+</script>
+</body>
+</html>

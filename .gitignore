@@ -1,0 +1,14 @@
+# 강의 자료 및 기타 파일 제외
+*.mov
+2026-05-19*
+0519_*
+0520*
+seedance*
+hf_*
+*.jpg
+*.png
+*.pdf
+break-timer.html
+flower_hand.html
+.agents/
+skills-lock.json
